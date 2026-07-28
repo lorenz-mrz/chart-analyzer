@@ -2,7 +2,7 @@
 
 Web-App zur Analyse von Chart-Daten (MT5, TradingView, Capital.com).
 
-**Live-App:** https://dein-link.streamlit.app
+**Live-App:** (https://chart-analyzer-for-trading.streamlit.app)
 
 ## Funktionen
 - CSV-Upload, Format wird automatisch erkannt

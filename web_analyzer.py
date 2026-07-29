@@ -6,7 +6,7 @@ st.set_page_config(page_title="Chart-Analyzer", layout="wide")
 st.markdown("<style>.stApp{background-color:#0e1117;} h1{color:#00d4aa;}</style>", unsafe_allow_html=True)
 
 st.title("📈 Chart-Analyzer")
-st.write("Lade CSV-Dateien hoch (MT5, TradingView oder Capital.com).")
+st.write("Lade deine CSV-Dateien hoch (MT5, TradingView oder Capital.com:).")
 
 def lade(datei):
     inhalt = datei.getvalue().decode("utf-8")
@@ -32,7 +32,7 @@ def lade(datei):
         df["Zeit"] = pd.RangeIndex(len(df))
     return df, spalten
 
-def backtest(close, high, low, signal, stop_prozent, ziel_r, richtung):
+def backtest(close, high, low, signal, stop_prozent, ziel_r, richtung, kosten_r):
     ergebnisse = []
     i = 0
     while i < len(close) - 1:
@@ -53,10 +53,10 @@ def backtest(close, high, low, signal, stop_prozent, ziel_r, richtung):
                     raus_stop = high.iloc[j] >= stop
                     raus_ziel = low.iloc[j] <= ziel
                 if raus_stop:
-                    ergebnisse.append(-1.0)
+                    ergebnisse.append(-1.0 - kosten_r)
                     break
                 if raus_ziel:
-                    ergebnisse.append(ziel_r)
+                    ergebnisse.append(ziel_r - kosten_r)
                     break
                 j = j + 1
             i = j + 1
@@ -64,6 +64,29 @@ def backtest(close, high, low, signal, stop_prozent, ziel_r, richtung):
             i = i + 1
     return pd.Series(ergebnisse)
 
+def signale(df, sp, strategie, sma_laenge):
+    close = df[sp["close"]]
+    sma = close.rolling(sma_laenge).mean()
+
+
+    if strategie == "SMA-Kreuzung":
+        drueber = close > sma
+        lo = drueber & ~drueber.shift(1, fill_value=False)
+        sh = (~drueber) & drueber.shift(1, fill_value=False)
+    elif strategie == "Umkehrkerze":
+        rng = df[sp["high"]] - df[sp["low"]]
+        lo = close >= df[sp["low"]] + rng * 2/ 3
+        sh = close >= df[sp["high"]] - rng * 2 / 3
+
+
+    elif strategie == "Ausbruch":
+        hoch20 = df[sp["high"]].rolling(20).max().shift(1)
+        tief20 = df[sp["low"]].rolling(20).min().shift(1)
+        lo = close > hoch20
+        sh = close < tief20
+
+
+    return lo.fillna(False), sh.fillna(False)
 dateien = st.file_uploader("Dateien auswählen", type="csv", accept_multiple_files=True)
 
 if dateien:
@@ -71,9 +94,10 @@ if dateien:
     typ = st.sidebar.radio("Chart-Typ", ["Linie", "Kerzen"])
     st.sidebar.divider()
     bt_an = st.sidebar.checkbox("Backtest anzeigen")
+    strategie = st.sidebar.selectbox("Strategie", ["SMA-Kreuzung", "Umkehrkerze", "Ausbruch"])
     stop_prozent = st.sidebar.number_input("Stop in %", 0.1, 10.0, 1.0, 0.1)
     ziel_r = st.sidebar.number_input("Ziel in R", 1.0, 10.0, 2.0, 0.5)
-
+    kosten_r = st.sidebar.number_input("Kosten pro Trade (in R)", 0.0, 0.5, 0.05, 0.01)
     for datei in dateien:
         st.divider()
         st.subheader(datei.name)
@@ -123,20 +147,17 @@ if dateien:
         st.plotly_chart(fig, use_container_width=True)
 
         if bt_an and "high" in sp and "low" in sp:
-            st.markdown("### 🎯 Backtest: SMA-Kreuzung")
-            sma = close.rolling(sma_laenge).mean()
-            drueber = close > sma
-            sig_long = drueber & ~drueber.shift(1, fill_value=False)
-            sig_short = (~drueber) & drueber.shift(1, fill_value=False)
+            st.markdown("### 🎯 Backtest: " + strategie)
+            sig_long, sig_short = signale(df, sp, strategie, sma_laenge)
             high = df[sp["high"]]
             low = df[sp["low"]]
 
-            r_long = backtest(close, high, low, sig_long, stop_prozent, ziel_r, "Long")
-            r_short = backtest(close, high, low, sig_short, stop_prozent, ziel_r, "Short")
+            r_long = backtest(close, high, low, sig_long, stop_prozent, ziel_r, "Long", kosten_r)
+            r_short = backtest(close, high, low, sig_short, stop_prozent, ziel_r, "Short", kosten_r)
 
             bh = round((close.iloc[-1] / close.iloc[0] - 1) * 100, 1)
             breakeven = round(100 / (1 + ziel_r), 1)
-
+            bh_in_r = round(bh / stop_prozent, 1)
             k1, k2 = st.columns(2)
             with k1:
                 st.write("**Long**")
@@ -149,8 +170,11 @@ if dateien:
                 st.write("Winrate:", round((r_short > 0).mean() * 100, 1), "%")
                 st.write("Gesamt:", round(r_short.sum(), 1), "R")
 
-            st.caption("Break-even-Winrate bei " + str(ziel_r) + "R: " + str(breakeven) + " %  ·  Buy & Hold: " + str(bh) + " %")
-
+            st.caption("Break-even-Winrate bei " + str(ziel_r) + "R: " + str(breakeven) + " %  ·  Buy & Hold: " + str(bh) + " %= " + str(bh_in_r) + " R")
+            if r_long.sum() < bh_in_r:
+                st.error("😓Strategie schlägt Buy and Hold NICHT")
+            else:
+                st.success("🐸Strategie schlägt Buy and Hold")
             if len(r_long) > 0 and len(r_short) > 0:
                 if r_long.sum() > 0 and r_short.sum() < 0:
                     st.warning("⚠️ Long gewinnt, Short verliert → wahrscheinlich nur Markttrend (Beta), kein echter Edge.")

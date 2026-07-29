@@ -9,3 +9,5 @@ Web-App zur Analyse von Chart-Daten (MT5, TradingView, Capital.com).
 - Kennzahlen: Veränderung, Höchst/Tiefst, Volatilität
 - Linien- und Kerzen-Chart mit einstellbarem SMA
 - Zeitraum-Filter und CSV-Download
+- Gebaut mit Python, Streamlit und Plotly
+
